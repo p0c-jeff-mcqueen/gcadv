@@ -3,8 +3,12 @@
    ===================================================== */
 
 /* ── Webhook endpoints ── */
-const WEBHOOK_VISIT = 'https://webhook.gomesechagasadv.com/visitas';
-const WEBHOOK_LEAD  = 'https://webhook.gomesechagasadv.com/leads';
+const WEBHOOK_BASE  = 'https://webhook.gomesechagasadv.com';
+const WEBHOOK_VISIT = WEBHOOK_BASE + '/api/visits';
+const WEBHOOK_LEAD  = WEBHOOK_BASE + '/api/leads';
+
+// Segredo compartilhado com o servidor Vercel (variável WEBHOOK_SECRET)
+const WEBHOOK_SECRET = 'adv-secret-2024';
 
 /* ── Visitor tracking ── */
 (function trackVisitor() {
@@ -51,7 +55,7 @@ const WEBHOOK_LEAD  = 'https://webhook.gomesechagasadv.com/leads';
 
   const basePayload = {
     timestamp,
-    page,
+    page_url:   page,       // campo esperado pela API
     referrer,
     browser:    detectBrowser(ua),
     os:         detectOS(ua),
@@ -62,24 +66,22 @@ const WEBHOOK_LEAD  = 'https://webhook.gomesechagasadv.com/leads';
     platform,
   };
 
-  sendBeacon(WEBHOOK_VISIT, basePayload);
+  postWebhook(WEBHOOK_VISIT, basePayload);
 })();
 
-/* ── Utilitário de envio (prefere sendBeacon, cai em fetch) ── */
-function sendBeacon(url, payload) {
-  const body = JSON.stringify(payload);
-  if (navigator.sendBeacon) {
-    // text/plain evita CORS preflight (requisição "simples")
-    // o servidor recebe o corpo JSON normalmente
-    navigator.sendBeacon(url, new Blob([body], { type: 'text/plain' }));
-  } else {
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      keepalive: true,
-    }).catch(() => {});
-  }
+/* ── Utilitário de envio ── */
+// sendBeacon não suporta headers customizados, portanto usamos
+// fetch com keepalive:true (não bloqueia o unload da página).
+function postWebhook(url, payload) {
+  fetch(url, {
+    method:    'POST',
+    headers:   {
+      'Content-Type':     'application/json',
+      'x-webhook-secret': WEBHOOK_SECRET,
+    },
+    body:      JSON.stringify(payload),
+    keepalive: true,
+  }).catch(() => {}); // falha silenciosa
 }
 
 (function () {
@@ -187,24 +189,20 @@ function sendBeacon(url, payload) {
       btn.textContent = 'Enviando…';
 
       const data = new FormData(form);
+      // Campos mapeados para o schema de /api/leads
       const payload = {
-        timestamp: new Date().toISOString(),
-        nome:      data.get('nome'),
-        empresa:   data.get('empresa'),
-        email:     data.get('email'),
-        telefone:  data.get('telefone'),
-        area:      data.get('area'),
-        mensagem:  data.get('mensagem'),
-        origem:    window.location.href,
-        referrer:  document.referrer || 'direto',
+        name:        data.get('nome'),
+        email:       data.get('email'),
+        phone:       data.get('telefone'),
+        subject:     data.get('area'),
+        message:     data.get('mensagem'),
+        source_page: window.location.href,
       };
 
-      fetch(WEBHOOK_LEAD, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-        .catch(() => {}) // falha silenciosa — não bloqueia o UX
+      postWebhook(WEBHOOK_LEAD, payload);
+
+      // UX: exibe mensagem de sucesso sem aguardar resposta do servidor
+      Promise.resolve()
         .finally(() => {
           form.parentElement.innerHTML = `
             <div class="form-success">
